@@ -4,21 +4,246 @@
 (3)上机实习由一名教师检查，检查完毕，一组学生同时离开机房 试用P、V实现其过程。 
 注意： 本题目隐含一个进程(Guard )。
 
-var stu,computer,enter,finish,test:semaphore;
-ste:=2N;
-computer:=2M;
-enter:=0;
-finish:=0;
-test:=0;
+//c++ 实现 信号量
+#include <stdio.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include <cstring>
+#include <unistd.h>
+#include <string>
+#include <cstdlib>
+#include<ctime> 
+#include<fstream>
+using namespace std;
+#define N 4
+#define M 2
+#define WORK 3 
+ofstream fout("1.txt");
+sem_t student, computer, enter,finish,check;
+int empty_count, full_count; //空闲的机位，剩余的机位
+int Computer[2*M] = {};
+int Student[2*N]={};
 
-cobegin
-Procedure Student   Procedure Teacher   Procedure Guard
-  begin               begin               begin
-  p(computer);        p(finish);            p(stu);
-  p(stu);              Test the work;       p(stu);
-    Start computer;   v(test);               Enter;
-  v(finish);          v(test);              v(enter);
-  v(test);            end                   v(enter);
-  v(computer);                            end
-  end
-coend
+//_id 代表组号，_start 学生到达的时间  _work学生检查花费的时间 
+struct arg{
+	arg(int _id, int _start, int _work, string _indent): id(_id), start(_start), work(_work), indent(_indent){}
+	arg(int _id): id(_id), start(0), work(0), indent(string("")){}
+	int id;
+	int start;
+	int work;
+	string indent;	
+};
+int s_task_done = -1;
+//学生 
+void* student_f(void* argv){
+// V(student)  学生到达 
+//P（computer） 获取一台计算机资源
+//P(enter)等待允许进入
+/*和合作者做完实验*/
+//V(finish)实习完成 
+//P(check) 等待教师检查
+//V(computer) 释放计算机资源
+ arg arg1 = *(arg*)argv;
+ int id = arg1.id;
+ const char* indent = arg1.indent.c_str();
+ sleep(arg1.work);
+ fout<<indent<<" "<<id<<" START\n";
+ printf("%s %d START\n", indent,id);
+
+ sem_post(&student); //V
+  fout<<indent<<" "<<id<<" STUDENT\n";
+ printf("%s %d STUDENT\n", indent,id);
+ 
+ sem_wait(&computer); //P
+  fout<<indent<<" "<<id<<" COMPUTER\n";
+ printf("%s %d COMPUTER\n",indent,id);
+ 
+ sem_wait(&enter); //P
+  fout<<indent<<" "<<id<<" ENTER\n";
+  printf("%s %d ENTER\n",indent,id);
+
+ sleep(arg1.work);
+  fout<<indent<<" "<<id<<" 组，合作完成实验\n";
+ printf("%s 合作完成实验\n",indent);
+ s_task_done++;
+ 
+ sem_post(&finish);  //V
+  fout<<indent<<" "<<id<<" FINISH\n";
+  printf("%s %d FINISH\n",indent,id);
+  
+ sem_wait(&check); //P
+  fout<<indent<<"  CHECK\n";
+  printf("%sCHECK\n",indent);
+ sem_post(&computer);//V
+ 
+ return NULL; 
+ 
+}
+//老师 
+void*teacher_f(void* t)
+{
+	while(1)
+	{
+	
+	// P（finish）等待学生实习完成呢 
+	// P(finish)等待另一个学生实习完 
+	/*检查*/ 
+	//V(check)
+	//V(check)
+	 sem_wait(&finish);
+	  fout<<"  --FINISH_1--\n";
+	 printf("  --FINISH_1--\n");
+	 sem_wait(&finish);
+	 fout<<"  --FINISH_2\n";
+	 printf("  --FINISH_2--\n");
+	 sem_post(&check);
+	  
+     sleep(2);
+      fout<<"  --CHECK1--\n";
+	 printf("  --CHECK1--\n");
+	   
+	    fout<<"  --CHECK_2--\n";
+	 printf("  --CHECK_2--\n");
+	 sem_post(&check);
+	 
+	
+	}
+	return NULL;
+	
+}
+//监控 
+void *moniter_f(void*argv)
+{
+	//P(student)等待学生达到
+	//P(student)等待另一个学生到达
+	//V(enter) 允许进入
+	//V(enter)允许进入
+	arg arg1 = *(arg*)argv;
+	int id = arg1.id;
+ 	const char* indent = arg1.indent.c_str();
+ 	sleep(arg1.start);
+	sem_wait(&student);
+	sleep(arg1.work);
+	sem_wait(&student);
+	 fout<<"---"<<id<<" 组到达第一个人---\n";
+	 fout<<"---"<<id<<" 组到达第二个人---\n";
+	printf("---%d 组到达---",id);
+	sem_post(&enter);
+	sem_post(&enter);
+	 fout<<"---"<<id<<" 组准许进入---\n";
+	printf("---%d 组准许进入---",id);
+	return NULL;
+	 
+}
+int main()
+{
+		srand((unsigned)time(NULL));
+		memset(Computer, 0, sizeof(int) *2*M);
+		memset(Student, 0, sizeof(int) * 2*N);
+		sem_init(&student, 0, 0);
+		sem_init(&computer, 0, 2*M);
+		sem_init(&enter, 0, 0);
+		sem_init(&finish,0,0);
+		sem_init(&check,0,0);
+		empty_count = 2*M;
+		full_count = 0;
+		
+		pthread_t p_student[2*N];
+		pthread_t p_moniter[N];
+		pthread_t *p_teacher;
+		int s_count=0;
+	
+	
+		int st_time = 0;	//共有4对 
+		int s1_time_work[N][3] = {
+		/* 第一个数字参数代表 组号，第二参数代表到达机房的时刻，第三个老师参数代表检查的时间 */
+		{0,st_time += 0, rand()%WORK}, 
+		{1,st_time += 1, rand()%WORK}, 
+		{2,st_time += 0, rand()%WORK}, 
+		{3,st_time += 1, rand()%WORK}
+		};
+		st_time=0; 
+		int s2_time_work[N][3] = {
+		/* */
+		{4,st_time += 0, rand()%WORK}, 
+		{ 5,st_time += 1, rand()%WORK}, 
+		{6,st_time += 0, rand()%WORK}, 
+		{ 7,st_time += 1, rand()%WORK}
+		};
+		int tmp_p = 0;
+		for (int i = 0; i < N; i++)
+		{
+			if ((s1_time_work[i][0] == i)&&((s2_time_work[i][0]-N)==i)){
+				printf("学生的组数：%d\t", tmp_p++);
+			} 
+		}
+		printf("\n");
+		int rc; 
+		string ident("");
+		for (int i = 0; i < N; i++){
+				if ((s1_time_work[i][0] == i)&&((s2_time_work[i][0]-N)==i)){
+					
+				rc = pthread_create(p_student +i, NULL, student_f, new arg(i, s1_time_work[i][1], s1_time_work[i][2],ident));
+				if (rc) printf("ERROR\n");
+				
+				rc = pthread_create(p_student +i+N, NULL, student_f, new arg(i, s2_time_work[i][1], s2_time_work[i][2],ident));
+				if (rc) printf("ERROR\n");
+				
+				rc=pthread_create(p_moniter+i,NULL,moniter_f,new arg(i,s1_time_work[i][1],s2_time_work[i][1],ident));
+				if (rc) printf("ERROR\n");
+			} 
+			ident += '\t';
+		}
+	
+		int k=0;
+		rc=pthread_create(p_teacher,NULL,moniter_f,NULL);
+		if (rc) printf("ERROR\n");
+		
+		for (int i = 0; i < N; i++){
+			pthread_join(p_student[i], NULL);
+			pthread_join(p_student[i+N], NULL);
+			pthread_join(p_moniter[i], NULL);
+		
+		}	
+		fout.close(); 
+	return 0;
+ } 
+
+
+实验的部分结果:
+ 0 START
+ 0 STUDENT
+ 0 COMPUTER
+	 1 START
+	 1 STUDENT
+---0 组到达第一个人---
+---0 组到达第二个人---
+	 1 START
+	 1 COMPUTER
+	 1 STUDENT
+	 1 COMPUTER
+		 2 START
+--- 00 ENTER
+	 1 ENTER
+ 0 组，合作完成实验
+ 0 FINISH
+		 2 STUDENT
+	 1 组，合作完成实验
+	 1 FINISH
+		 2 COMPUTER
+ 0 START
+ 0 STUDENT
+---1 组到达第一个人---
+---1 组到达第二个人---
+		 2 START
+---1 组准许进入---
+	 1 ENTER
+		 2 ENTER
+			 3 START
+			 3 START
+		 2 STUDENT
+---2 组到达第一个人---
+---2 组到达第二个人---
+		 2 组，合作完成实验
+		 2 FINISH
+	 1 组，合作完成实验
